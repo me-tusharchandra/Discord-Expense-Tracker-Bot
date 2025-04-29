@@ -1,6 +1,9 @@
 # Discord Expense Tracker Bot
 
 A Discord bot that tracks both expenses and income, then updates them to a Google Sheet with advanced visualization and reporting features.
+--------
+
+![Demo](GIF.gif)
 
 ## Setup Instructions
 
