@@ -19,6 +19,7 @@ from typing import Optional, Literal
 from datetime import datetime, timedelta
 from matplotlib.colors import LinearSegmentedColormap
 from oauth2client.service_account import ServiceAccountCredentials
+from discord import ui
 
 # Load environment variables
 load_dotenv()
@@ -251,7 +252,26 @@ async def add_expense(interaction: discord.Interaction, amount: float, descripti
         # Add the expense to the sheet
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         worksheet.append_row([str(interaction.user), str(amount), description, category, 'Expense', current_time])
-        await interaction.response.send_message(f'Expense of ${amount:.2f} for "{description}" has been recorded in category "{category}"!')
+        
+        # Create confirmation embed
+        embed = discord.Embed(
+            title="📝 Expense Saved!",
+            description="Your expense has been recorded.",
+            color=0x00ff00
+        )
+        
+        # Add expense details
+        embed.add_field(name="Item", value=description, inline=True)
+        embed.add_field(name="Amount", value=f"₹{amount}", inline=True)
+        embed.add_field(name="Category", value=f"📚 {category}", inline=True)
+        
+        # Add footer with timestamp
+        embed.set_footer(text=f"Tracked by ExpenseBot • {datetime.now().strftime('%b %d, %Y at %I:%M %p')}")
+        
+        # Create and send view with buttons
+        view = ExpenseConfirmView(interaction, amount, description, category)
+        await interaction.response.send_message(embed=embed, view=view)
+        
     except Exception as e:
         await interaction.response.send_message(f'Error recording expense: {str(e)}')
         print(f"Error in add_expense: {e}")
@@ -998,6 +1018,85 @@ async def financial_chart(interaction: discord.Interaction, chart_type: str, per
         await interaction.followup.send(f'Error generating chart: {str(e)}')
         print(f"Error in financial_chart: {e}")
         traceback.print_exc()
+
+# Inside your existing bot code, create UI classes for buttons
+
+class ExpenseConfirmView(discord.ui.View):
+    def __init__(self, original_interaction, amount, description, category):
+        super().__init__(timeout=180)
+        self.original_interaction = original_interaction
+        self.amount = amount
+        self.description = description
+        self.category = category
+        
+    @discord.ui.button(label="View Report", style=discord.ButtonStyle.primary, emoji="📊")
+    async def view_report(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Generate report embed
+        embed = discord.Embed(title="📊 Expense Report - April 2025", description="Here's your spending breakdown:", color=0x3498db)
+        
+        # Get data from Google Sheet
+        # (This would use your existing get_processed_records function)
+        df = get_processed_records()
+        df = df[df['User'] == str(interaction.user)]
+        
+        # Calculate total
+        total_spent = df[df['Type'] == 'Expense']['Amount'].sum()
+        
+        # Add to embed
+        embed.add_field(name="Total Spent", value=f"₹{total_spent}", inline=False)
+        
+        # Get expenses by category
+        expenses_by_category = df[df['Type'] == 'Expense'].groupby('Category')['Amount'].sum()
+        for category, amount in expenses_by_category.items():
+            embed.add_field(name=f"{category}", value=f"₹{amount}", inline=True)
+            
+        # Add chart (using your existing chart function)
+        chart_buffer = generate_chart_image(df, "expense_by_category", "this month")
+        chart_file = discord.File(fp=chart_buffer, filename="expense_chart.png")
+        embed.set_image(url="attachment://expense_chart.png")
+        
+        await interaction.response.send_message(embed=embed, file=chart_file)
+        
+    @discord.ui.button(label="Budget Status", style=discord.ButtonStyle.success, emoji="💰")
+    async def budget_status(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Create budget status embed
+        df = get_processed_records()
+        df = df[df['User'] == str(interaction.user)]
+        
+        income = df[df['Type'] == 'Income']['Amount'].sum()
+        expenses = df[df['Type'] == 'Expense']['Amount'].sum()
+        balance = income - expenses
+        
+        embed = discord.Embed(title="💰 Budget Status", color=0x2ecc71)
+        embed.add_field(name="Total Income", value=f"₹{income:.2f}", inline=True)
+        embed.add_field(name="Total Expenses", value=f"₹{expenses:.2f}", inline=True)
+        embed.add_field(name="Balance", value=f"₹{balance:.2f}", inline=True)
+        
+        if balance > 0:
+            embed.set_footer(text="✅ You're in the green! Keep it up!")
+        else:
+            embed.set_footer(text="❌ You're spending more than you earn.")
+            
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+    @discord.ui.button(label="Undo", style=discord.ButtonStyle.danger, emoji="↩️")
+    async def undo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Delete the last entry for this user
+        # This would need access to your Google Sheet
+        try:
+            # Get all values and find the last entry from this user
+            all_values = worksheet.get_all_values()
+            user_entries = [i for i, row in enumerate(all_values) if row[0] == str(interaction.user)]
+            
+            if user_entries:
+                last_entry_index = user_entries[-1]
+                # Delete the row (add 1 because sheets are 1-indexed)
+                worksheet.delete_row(last_entry_index + 1)
+                await interaction.response.send_message("✅ Last expense entry deleted!", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ No entries found to delete.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"Error undoing entry: {str(e)}", ephemeral=True)
 
 # Run the bot
 bot.run(os.getenv('DISCORD_TOKEN')) 
